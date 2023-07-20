@@ -1,12 +1,13 @@
 locals {
   len_public_subnets      = max(length(var.public_subnets), length(var.public_subnet_ipv6_prefixes))
   len_private_subnets     = max(length(var.private_subnets), length(var.private_subnet_ipv6_prefixes))
+  len_secondary_private_subnets = max(length(var.private_secondary_subnets))
   len_database_subnets    = max(length(var.database_subnets), length(var.database_subnet_ipv6_prefixes))
   len_elasticache_subnets = max(length(var.elasticache_subnets), length(var.elasticache_subnet_ipv6_prefixes))
   len_redshift_subnets    = max(length(var.redshift_subnets), length(var.redshift_subnet_ipv6_prefixes))
   len_intra_subnets       = max(length(var.intra_subnets), length(var.intra_subnet_ipv6_prefixes))
   len_outpost_subnets     = max(length(var.outpost_subnets), length(var.outpost_subnet_ipv6_prefixes))
-
+  
   max_subnet_length = max(
     local.len_private_subnets,
     local.len_public_subnets,
@@ -220,6 +221,7 @@ resource "aws_network_acl_rule" "public_outbound" {
 
 locals {
   create_private_subnets = local.create_vpc && local.len_private_subnets > 0
+  create_secondary_cidr_subnets = local.create_vpc && local.len_secondary_private_subnets > 0
 }
 
 resource "aws_subnet" "private" {
@@ -277,6 +279,47 @@ resource "aws_route_table_association" "private" {
     var.single_nat_gateway ? 0 : count.index,
   )
 }
+
+resource "aws_route_table_association" "secondary_private" {
+  count = local.create_secondary_cidr_subnets ? local.len_secondary_private_subnets : 0
+
+  subnet_id = element(aws_subnet.private_secondary_subnets[*].id, count.index)
+  route_table_id = element(
+    aws_route_table.private[*].id,
+    var.single_nat_gateway ? 0 : count.index,
+  )
+}
+
+##Subnet creation for Additional cidrblock
+resource "aws_subnet" "private_secondary_subnets" {
+  count = local.create_secondary_cidr_subnets ? local.len_secondary_private_subnets : 0
+
+  assign_ipv6_address_on_creation                = var.enable_ipv6 && var.private_subnet_ipv6_native ? true : var.private_subnet_assign_ipv6_address_on_creation
+  availability_zone                              = length(regexall("^[a-z]{2}-", element(var.azs, count.index))) > 0 ? element(var.azs, count.index) : null
+  availability_zone_id                           = length(regexall("^[a-z]{2}-", element(var.azs, count.index))) == 0 ? element(var.azs, count.index) : null
+  cidr_block                                     = var.private_subnet_ipv6_native ? null : element(concat(var.private_secondary_subnets, [""]), count.index)
+  enable_dns64                                   = var.enable_ipv6 && var.private_subnet_enable_dns64
+  enable_resource_name_dns_aaaa_record_on_launch = var.enable_ipv6 && var.private_subnet_enable_resource_name_dns_aaaa_record_on_launch
+  enable_resource_name_dns_a_record_on_launch    = !var.private_subnet_ipv6_native && var.private_subnet_enable_resource_name_dns_a_record_on_launch
+  ipv6_cidr_block                                = var.enable_ipv6 && length(var.private_subnet_ipv6_prefixes) > 0 ? cidrsubnet(aws_vpc.this[0].ipv6_cidr_block, 8, var.private_subnet_ipv6_prefixes[count.index]) : null
+  ipv6_native                                    = var.enable_ipv6 && var.private_subnet_ipv6_native
+  private_dns_hostname_type_on_launch            = var.private_subnet_private_dns_hostname_type_on_launch
+  vpc_id                                         = local.vpc_id
+
+  tags = merge(
+    {
+      Type = "private_secondary"
+      Name = try(
+        var.private_subnet_names[count.index],
+        format("${var.name}-${var.private_subnet_suffix}-%s", element(var.azs, count.index))
+      )
+    },
+    var.tags,
+    var.private_subnet_tags,
+    lookup(var.private_subnet_tags_per_az, element(var.azs, count.index), {})
+  )
+}
+
 
 ################################################################################
 # Private Network ACLs
@@ -1041,7 +1084,7 @@ locals {
 resource "aws_eip" "nat" {
   count = local.create_vpc && var.enable_nat_gateway && !var.reuse_nat_ips ? local.nat_gateway_count : 0
 
-  domain = "vpc"
+  # domain = "vpc"
 
   tags = merge(
     {

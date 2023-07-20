@@ -169,6 +169,16 @@ output "private_subnet_arns" {
   value       = aws_subnet.private[*].arn
 }
 
+output "private_secondary_subnets" {
+  description = "List of IDs of private subnets"
+  value       = aws_subnet.private_secondary_subnets[*].id
+}
+
+output "private_secondary_subnets_arns" {
+  description = "List of ARNs of private subnets"
+  value       = aws_subnet.private_secondary_subnets[*].arn
+}
+
 output "private_subnets_cidr_blocks" {
   description = "List of cidr_blocks of private subnets"
   value       = compact(aws_subnet.private[*].cidr_block)

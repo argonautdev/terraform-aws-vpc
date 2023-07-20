@@ -306,6 +306,13 @@ variable "private_subnets" {
   default     = []
 }
 
+variable "private_secondary_subnets" {
+  description = "A list of private secondary subnets inside the VPC"
+  type        = list(string)
+  default     = []
+}
+
+
 variable "private_subnet_assign_ipv6_address_on_creation" {
   description = "Specify true to indicate that network interfaces created in the specified subnet should be assigned an IPv6 address. Default is `false`"
   type        = bool
